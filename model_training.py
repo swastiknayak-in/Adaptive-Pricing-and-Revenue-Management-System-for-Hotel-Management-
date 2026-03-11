@@ -1,5 +1,5 @@
 # model_training.py
-# Train hotel pricing model for Adaptive Pricing and Revenue Management System
+# Train pricing model for Adaptive Pricing and Revenue Management System
 
 import os
 import pandas as pd
@@ -7,28 +7,24 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 import joblib
 
 
 # -----------------------------
-# Load Dataset
+# Load dataset
 # -----------------------------
 def load_data(path="data/hotel_bookings.csv"):
-
-    df = pd.read_csv(path)
-
-    return df
+    return pd.read_csv(path)
 
 
 # -----------------------------
-# Convert Month Name → Number
+# Convert month name → number
 # -----------------------------
-def clean_month(col):
+def month_to_num(col):
 
     months = {
         "January":1,"February":2,"March":3,"April":4,
@@ -40,45 +36,18 @@ def clean_month(col):
 
 
 # -----------------------------
-# Feature Engineering
+# Feature preprocessing
 # -----------------------------
-def feature_engineering(df):
+def preprocess_features(df):
 
     df = df.copy()
 
-    # Convert month to number
-    df["arrival_month"] = clean_month(df["arrival_date_month"])
+    df["arrival_month"] = month_to_num(df["arrival_date_month"])
 
-    # Demand indicator
     df["demand_score"] = (
         df["lead_time"] +
         df["previous_bookings_not_canceled"]
     )
-
-    return df
-
-
-# -----------------------------
-# Feature Preprocessing
-# -----------------------------
-def preprocess_features(df):
-
-    df = feature_engineering(df)
-
-    required_columns = [
-        "hotel",
-        "lead_time",
-        "arrival_month",
-        "reserved_room_type",
-        "customer_type",
-        "previous_bookings_not_canceled",
-        "demand_score",
-        "adr"
-    ]
-
-    for col in required_columns:
-        if col not in df.columns:
-            raise ValueError(f"Missing column: {col}")
 
     df = df.dropna(subset=["adr"])
 
@@ -100,7 +69,7 @@ def preprocess_features(df):
 
 
 # -----------------------------
-# Train Model
+# Train model
 # -----------------------------
 def train_and_save(data_path="data/hotel_bookings.csv", model_dir="models"):
 
@@ -111,13 +80,9 @@ def train_and_save(data_path="data/hotel_bookings.csv", model_dir="models"):
     X, y = preprocess_features(df)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
+        X, y, test_size=0.2, random_state=42
     )
 
-    # Numeric features
     numeric_features = [
         "lead_time",
         "arrival_month",
@@ -125,86 +90,61 @@ def train_and_save(data_path="data/hotel_bookings.csv", model_dir="models"):
         "demand_score"
     ]
 
-    numeric_transformer = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler())
-        ]
-    )
-
-    # Categorical features
     categorical_features = [
         "hotel",
         "reserved_room_type",
         "customer_type"
     ]
 
+    numeric_transformer = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler())
+        ]
+    )
+
     categorical_transformer = Pipeline(
-        steps=[
+        [
             ("imputer", SimpleImputer(strategy="most_frequent")),
             ("encoder", OneHotEncoder(handle_unknown="ignore"))
         ]
     )
 
-    # Combine preprocessing
     preprocessor = ColumnTransformer(
-        transformers=[
+        [
             ("num", numeric_transformer, numeric_features),
             ("cat", categorical_transformer, categorical_features)
         ]
     )
 
-    # Models to compare
-    models = {
+    model = RandomForestRegressor(
+        n_estimators=150,
+        random_state=42
+    )
 
-        "LinearRegression": LinearRegression(),
+    pipeline = Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("model", model)
+        ]
+    )
 
-        "RandomForest": RandomForestRegressor(
-            n_estimators=150,
-            random_state=42
-        )
+    pipeline.fit(X_train, y_train)
 
-    }
+    preds = pipeline.predict(X_test)
 
-    best_model = None
-    best_rmse = float("inf")
+    rmse = np.sqrt(mean_squared_error(y_test, preds))
 
-    for name, model in models.items():
+    print("Model RMSE:", rmse)
 
-        pipeline = Pipeline(
-            steps=[
-                ("preprocessor", preprocessor),
-                ("model", model)
-            ]
-        )
-
-        pipeline.fit(X_train, y_train)
-
-        preds = pipeline.predict(X_test)
-
-        rmse = np.sqrt(mean_squared_error(y_test, preds))
-
-        print(name, "RMSE:", rmse)
-
-        if rmse < best_rmse:
-
-            best_rmse = rmse
-
-            best_model = pipeline
-
-    # Save best model
     model_path = os.path.join(model_dir, "pricing_model.pkl")
 
-    joblib.dump(best_model, model_path)
+    joblib.dump(pipeline, model_path)
 
-    print("Model saved at:", model_path)
+    print("Model saved:", model_path)
 
-    return best_model
+    return pipeline
 
 
-# -----------------------------
-# Run training
-# -----------------------------
 if __name__ == "__main__":
-
     train_and_save()
